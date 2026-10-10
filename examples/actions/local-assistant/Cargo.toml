@@ -1,0 +1,19 @@
+[package]
+name = "meeting-local-assistant"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+description = "Optional local Ollama action for Omarchy Meeting Recorder"
+
+[dependencies]
+libc = "0.2.189"
+serde_json = "1.0.151"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

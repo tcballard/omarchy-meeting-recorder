@@ -73,6 +73,10 @@ omarchy-meeting-recorder action "Store transcript in Obsidian" ~/Documents/Meeti
 
 That runs it exactly as the menu does and prints what the app would show.
 
+## Example: Local meeting assistant (experimental)
+
+For an experimental local-only recap, questions and note expansion using Ollama, see [the optional Rust local assistant](../examples/actions/local-assistant/README.md). It reads a finished meeting and writes separate reports; recording and transcription stay in the app. Local document retrieval is opt-in. This helper does not change the recorder's default-agent chapter generation.
+
 ## Example: Store transcript in Obsidian
 
 Writes the meeting as a note in your Obsidian vault: date, duration and people as properties, the chapters, and the transcript. Running it again updates the same note. With `SUMMARY=1` your default agent puts a short summary and the action items on top. The last line is an `obsidian://` link, so **Open** takes you straight to the note.

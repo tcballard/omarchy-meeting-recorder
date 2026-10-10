@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Build and register the optional assistant; recording/transcription stay in the app.
+set -euo pipefail
+umask 077
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+config_dir=${XDG_CONFIG_HOME:-"$HOME/.config"}/omarchy-meeting-recorder
+config="$config_dir/config.toml"
+bin_dir="$HOME/.local/bin"
+bin="$bin_dir/meeting-local-assistant"
+for program in curl rg; do
+  command -v "$program" >/dev/null || { echo "Install $program, then run this installer again." >&2; exit 1; }
+done
+if [[ -e "$bin" || -L "$bin" ]]; then
+  echo "Already installed at $bin; this preview will not overwrite it." >&2
+  exit 1
+fi
+if [[ -L "$config" ]]; then
+  echo "The config is a symlink; add the Action by hand using the README." >&2
+  exit 1
+fi
+if [[ -f "$config" ]] && rg --fixed-strings --quiet 'meeting-local-assistant' "$config"; then
+  echo "A local assistant Action already exists; leaving it unchanged." >&2
+  exit 1
+fi
+binary="$root/meeting-local-assistant"
+if [[ ! -f "$binary" || ! -x "$binary" ]]; then
+  command -v cargo >/dev/null || { echo 'Install Rust 1.88 or newer, or use the native workflow artifact.' >&2; exit 1; }
+  target=${CARGO_TARGET_DIR:-"$root/target"}
+  [[ "$target" = /* ]] || target="$PWD/$target"
+  CARGO_TARGET_DIR="$target" cargo build --release --locked --manifest-path "$root/Cargo.toml"
+  binary="$target/release/meeting-local-assistant"
+fi
+mkdir -p -- "$bin_dir" "$config_dir"
+tmp=$(mktemp "$config_dir/.assistant-config.XXXXXX")
+trap 'rm -f -- "$tmp"' EXIT
+if [[ -f "$config" ]]; then
+  backup=$(mktemp "$config_dir/config.toml.before-assistant.XXXXXX")
+  cp -- "$config" "$backup"
+  cat -- "$config" > "$tmp"
+fi
+cat >> "$tmp" <<'ACTION'
+
+# Optional local assistant: run from the done page's Actions menu.
+[[action]]
+name = "Local meeting recap (Ollama)"
+command = "~/.local/bin/meeting-local-assistant summary"
+ACTION
+install -m 755 -- "$binary" "$bin"
+mv -- "$tmp" "$config"
+printf 'Installed. Open a finished meeting, choose Actions → Local meeting recap (Ollama), then Open folder to read the report.\n'
+printf 'Start local Ollama and install gemma4:e2b before the first run; no models are downloaded by this installer.\n'

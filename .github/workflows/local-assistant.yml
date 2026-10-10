@@ -1,0 +1,50 @@
+name: Local assistant
+
+on:
+  push:
+    branches: [feature/local-meeting-assistant]
+    paths: [examples/actions/local-assistant/**, .github/workflows/local-assistant.yml]
+  pull_request:
+    paths: [examples/actions/local-assistant/**, .github/workflows/local-assistant.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      RUSTUP_TOOLCHAIN: 1.88.0
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl ripgrep
+          rustup toolchain install 1.88.0 --profile minimal --component clippy,rustfmt
+      - name: Format and lint
+        run: |
+          cargo fmt --manifest-path examples/actions/local-assistant/Cargo.toml -- --check
+          cargo clippy --locked --all-targets --manifest-path examples/actions/local-assistant/Cargo.toml -- -D warnings
+          bash -n examples/actions/local-assistant/install
+      - name: Test
+        run: cargo test --locked --manifest-path examples/actions/local-assistant/Cargo.toml
+      - name: Build native helper
+        run: cargo build --locked --release --manifest-path examples/actions/local-assistant/Cargo.toml
+      - name: Package preview
+        run: |
+          mkdir -p dist/meeting-local-assistant
+          cp examples/actions/local-assistant/target/release/meeting-local-assistant dist/meeting-local-assistant/
+          cp examples/actions/local-assistant/{README.md,LICENSE,THIRD_PARTY_NOTICES.md,install} dist/meeting-local-assistant/
+          printf '%s\n' "$GITHUB_SHA" > dist/meeting-local-assistant/SOURCE_COMMIT
+          tar -C dist -czf dist/meeting-local-assistant-x86_64-linux.tar.gz meeting-local-assistant
+          cd dist
+          sha256sum meeting-local-assistant-x86_64-linux.tar.gz > meeting-local-assistant-x86_64-linux.tar.gz.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: meeting-local-assistant-x86_64-linux
+          path: |
+            dist/meeting-local-assistant-x86_64-linux.tar.gz
+            dist/meeting-local-assistant-x86_64-linux.tar.gz.sha256
