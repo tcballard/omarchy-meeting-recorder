@@ -281,6 +281,36 @@ fn action_runs_summary_questions_notes_and_rag_without_mutating_the_recording() 
             .any(|s| s.starts_with("task: question answering | query:")));
     }
     // A long meeting includes every part, including the final turn, in the requests.
+    // The native recorder's live path uses an immutable snapshot and never
+    // creates a second transcript/report. Exercise the same real transport.
+    let report_count = reports(&meeting).len();
+    let control = meeting_local_assistant::process::Control::new(
+        Arc::new(AtomicBool::new(false)),
+        Duration::from_secs(10),
+    );
+    let live = meeting_local_assistant::live_answer(
+        "Weekly",
+        "[01:23] You: I'll review on Tuesday.",
+        "Who reviews?",
+        "gemma4:e2b",
+        &control,
+    )
+    .unwrap();
+    assert!(live.contains("[01:23]"));
+    assert_eq!(reports(&meeting).len(), report_count);
+    let state = server.state.lock().unwrap();
+    let prompt = state
+        .requests
+        .iter()
+        .rev()
+        .find(|(route, _)| route == "/api/generate")
+        .unwrap()
+        .1["prompt"]
+        .as_str()
+        .unwrap();
+    assert!(prompt.contains("RECENT, PROVISIONAL"));
+    assert!(prompt.contains("Earlier discussion and the rest of the meeting are not available"));
+    drop(state);
     let long = format!(
         "{}**[1:59:59] Owen:** END_OF_MEETING_SENTINEL.\n",
         transcript.repeat(200)

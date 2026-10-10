@@ -778,6 +778,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "meeting-local-assistant"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde_json",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -885,6 +893,7 @@ dependencies = [
  "gtk4",
  "libadwaita",
  "libc",
+ "meeting-local-assistant",
  "ort",
  "realfft",
  "serde_json",

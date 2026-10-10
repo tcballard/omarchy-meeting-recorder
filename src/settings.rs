@@ -84,3 +84,22 @@ pub fn bar_widget_offered() -> bool {
 pub fn set_bar_widget_offered() {
     save("bar_widget_offered", "yes");
 }
+
+pub fn live_assistant_enabled() -> bool {
+    load()["live_assistant"].as_str() == Some("yes")
+}
+
+pub fn save_live_assistant(enabled: bool) {
+    save("live_assistant", if enabled { "yes" } else { "no" });
+}
+
+pub fn assistant_model() -> String {
+    load()["assistant_model"]
+        .as_str()
+        .unwrap_or(meeting_local_assistant::DEFAULT_MODEL)
+        .to_owned()
+}
+
+pub fn save_assistant_model(model: &str) {
+    save("assistant_model", model);
+}

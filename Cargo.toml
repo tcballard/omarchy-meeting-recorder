@@ -13,6 +13,7 @@ ort = "2.0.0-rc.13"
 realfft = "3"
 ureq = "3.4.2"
 whisper-rs = "0.16"
+meeting-local-assistant = { path = "examples/actions/local-assistant" }
 
 [features]
 default = ["vulkan"]

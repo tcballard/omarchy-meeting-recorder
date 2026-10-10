@@ -1,0 +1,50 @@
+name: Live assistant preview
+
+on:
+  push:
+    branches: [feature/local-meeting-assistant]
+    paths: [src/**, Cargo.toml, Cargo.lock, examples/actions/local-assistant/**, packaging/**, .github/workflows/live-assistant.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 40
+    steps:
+      - name: Install native build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential ca-certificates cmake clang libclang-dev curl git libssl-dev pkg-config libgtk-4-dev libadwaita-1-dev libvulkan-dev glslc ffmpeg xvfb xauth
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format and unit tests
+        run: |
+          cargo fmt -- --check
+          cargo test --locked --no-default-features
+          cargo clippy --locked --no-default-features --all-targets -- -D warnings
+      - name: GTK lifecycle test
+        run: xvfb-run -a cargo test --locked --no-default-features native_panel_rejects_stale_answers_and_clears_on_stop -- --ignored --test-threads=1
+      - name: Real Whisper live session fixture
+        run: |
+          export LIVE_TEST_DIR="$(mktemp -d)"
+          export LIVE_TEST_MODEL="$LIVE_TEST_DIR/ggml-tiny.en.bin"
+          curl --fail --location --output "$LIVE_TEST_MODEL" https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin
+          ffmpeg -nostdin -loglevel error -i bench/fixtures/call/mic.ogg -f s16le -ar 48000 -ac 2 "$LIVE_TEST_DIR/mic.raw"
+          ffmpeg -nostdin -loglevel error -i bench/fixtures/call/computer.ogg -f s16le -ar 48000 -ac 2 "$LIVE_TEST_DIR/system.raw"
+          cargo test --locked --no-default-features real_whisper_live_session_pauses_and_preserves_audio -- --ignored --test-threads=1
+      - name: Build native preview with Vulkan
+        run: cargo build --locked --release
+      - name: Package preview
+        run: |
+          packaging/release-tarball.sh
+          printf '%s\n' "$GITHUB_SHA" > dist/SOURCE_COMMIT
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: meeting-recorder-live-assistant-x86_64-linux
+          path: dist/*

@@ -18,7 +18,12 @@ cp README.md LICENSE "$dir/"
 sed "s/@ARCH@/$arch/" packaging/INSTALL.md > "$dir/INSTALL.md"
 cp "data/$name.desktop" "data/$name.xml" "$dir/data/"
 cp plugin/manifest.json plugin/Widget.qml "$dir/plugin/"
-cp examples/actions/* "$dir/examples/actions/"
+for action in examples/actions/*; do
+  if [[ -f "$action" ]]; then cp "$action" "$dir/examples/actions/"; fi
+done
+mkdir -p "$dir/docs"
+cp docs/live-assistant.md "$dir/docs/"
+cp examples/actions/local-assistant/THIRD_PARTY_NOTICES.md "$dir/"
 
 tar -C dist -czf "dist/$tarball" "$name-$version"
 (cd dist && sha256sum "$tarball" | tee "$tarball.sha256")

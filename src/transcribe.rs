@@ -83,23 +83,28 @@ fn emit(events: &Events, event: Event) {
 pub fn load_track(path: &Path) -> Result<Vec<f32>, String> {
     if path.extension().is_some_and(|e| e == "raw") {
         let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let frame = 2 * CHANNELS as usize;
-        let mono: Vec<f32> = bytes
-            .chunks_exact(frame)
-            .map(|f| {
-                let sum: f32 = f
-                    .as_chunks::<2>()
-                    .0
-                    .iter()
-                    .map(|s| f32::from(i16::from_le_bytes(*s)))
-                    .sum();
-                sum / CHANNELS as f32 / 32768.0
-            })
-            .collect();
-        Ok(downsample(&mono, RATE as usize / WHISPER_RATE))
+        Ok(raw_to_whisper_rate(&bytes))
     } else {
         decode_with_ffmpeg(path)
     }
+}
+
+/// Shared decoding for saved recordings and bounded live windows.
+pub(crate) fn raw_to_whisper_rate(bytes: &[u8]) -> Vec<f32> {
+    let frame = 2 * CHANNELS as usize;
+    let mono: Vec<f32> = bytes
+        .chunks_exact(frame)
+        .map(|f| {
+            let sum: f32 = f
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|s| f32::from(i16::from_le_bytes(*s)))
+                .sum();
+            sum / CHANNELS as f32 / 32768.0
+        })
+        .collect();
+    downsample(&mono, RATE as usize / WHISPER_RATE)
 }
 
 fn decode_with_ffmpeg(path: &Path) -> Result<Vec<f32>, String> {
@@ -945,6 +950,14 @@ fn whisper_pass(
 
 fn load_whisper(events: &Events, abort: &Abort) -> Result<WhisperContext, String> {
     let model = crate::models::ensure(events, abort)?;
+    load_whisper_path(&model, events, abort)
+}
+
+pub(crate) fn load_whisper_path(
+    model: &Path,
+    events: &Events,
+    abort: &Abort,
+) -> Result<WhisperContext, String> {
     if abort.load(Ordering::Relaxed) {
         return Err(CANCELLED.into());
     }
@@ -962,8 +975,82 @@ fn load_whisper(events: &Events, abort: &Abort) -> Result<WhisperContext, String
             ..Default::default()
         });
     }
-    WhisperContext::new_with_params(&model, context_params)
+    WhisperContext::new_with_params(model, context_params)
         .map_err(|e| format!("could not load the model {}: {e}", model.display()))
+}
+
+/// Provisional two-track pass using the same model and speech/echo gates.
+/// No speaker-model download or diarization during recording.
+pub(crate) fn live_pass(
+    context: &WhisperContext,
+    mic: &[f32],
+    computer: &[f32],
+    language: &str,
+    abort: &Abort,
+) -> Result<Vec<Segment>, String> {
+    let (mic, computer) = (mix(mic, &[]), mix(computer, &[]));
+    let mut segments = Vec::new();
+    for (track, regions, label) in [
+        (&mic, own_speech_regions(&mic, &computer), "You"),
+        (
+            &computer,
+            speech_regions(&[&computer], computer.len()),
+            "Remote",
+        ),
+    ] {
+        if !regions.is_empty() {
+            if abort.load(Ordering::Relaxed) {
+                return Err(CANCELLED.into());
+            }
+            let glued = Glued::new(track, &regions);
+            let mut state = context.create_state().map_err(|e| e.to_string())?;
+            let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+            params.set_n_threads(2);
+            params.set_language(Some(language));
+            params.set_no_context(true);
+            params.set_print_special(false);
+            params.set_print_progress(false);
+            params.set_print_realtime(false);
+            params.set_print_timestamps(false);
+            params.set_suppress_blank(true);
+            params.set_suppress_nst(true);
+            // Avoid whisper-rs's leaked boxed safe callbacks in a repeating
+            // worker. full() is synchronous; the Arc stays alive throughout
+            // all callback invocations, which only read this atomic.
+            unsafe extern "C" fn cancelled(data: *mut std::ffi::c_void) -> bool {
+                unsafe { (&*data.cast::<AtomicBool>()).load(Ordering::Relaxed) }
+            }
+            unsafe {
+                params.set_abort_callback(Some(cancelled));
+                params.set_abort_callback_user_data(Arc::as_ptr(abort).cast_mut().cast());
+            }
+            let result = state.full(params, &glued.samples);
+            if abort.load(Ordering::Relaxed) {
+                return Err(CANCELLED.into());
+            }
+            result.map_err(|e| e.to_string())?;
+            for segment in state.as_iter() {
+                if segment.no_speech_probability() > 0.6 {
+                    continue;
+                }
+                let text = segment
+                    .to_str_lossy()
+                    .map_err(|e| e.to_string())?
+                    .trim()
+                    .to_owned();
+                if text.is_empty() || is_noise_marker(&text) || is_stock_phrase(&text) {
+                    continue;
+                }
+                segments.push(Segment {
+                    start_ms: glued.locate(segment.start_timestamp() * 10).0,
+                    end_ms: glued.locate(segment.end_timestamp() * 10).0,
+                    speaker: label.into(),
+                    text,
+                });
+            }
+        }
+    }
+    Ok(interleave(segments))
 }
 
 /// Whisper over the stretches of `track` with sound in them, then the lines.

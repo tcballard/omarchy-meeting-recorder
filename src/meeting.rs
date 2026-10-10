@@ -318,7 +318,8 @@ mod tests {
 
     #[test]
     fn speakers_with_the_same_name_are_one_person() {
-        let mut manifest = super::from_folder(std::path::Path::new("/nowhere/202609291404 Call")).unwrap();
+        let mut manifest =
+            super::from_folder(std::path::Path::new("/nowhere/202609291404 Call")).unwrap();
         manifest.speakers = vec!["Jankees".into(), "Jankees".into(), "Denise".into()];
         assert_eq!(manifest.people(), vec!["Jankees", "Denise"]);
     }

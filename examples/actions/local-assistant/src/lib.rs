@@ -19,6 +19,28 @@ pub const DEFAULT_MODEL: &str = "gemma4:e2b";
 pub const DEFAULT_EMBEDDING_MODEL: &str = "embeddinggemma-2:270m";
 const PART_BYTES: usize = 8_000;
 
+/// A volatile snapshot supplied by the recorder, never a second meeting store.
+pub fn live_answer(
+    title: &str,
+    transcript: &str,
+    question: &str,
+    model: &str,
+    control: &Control,
+) -> Result<String, ApiError> {
+    if transcript.trim().is_empty()
+        || transcript.len() > 8_000
+        || question.trim().is_empty()
+        || question.len() > 1_000
+    {
+        return Err(ApiError::new(
+            "LIVE_INPUT",
+            "Supply a bounded recent transcript and a question of at most 1,000 bytes.",
+        ));
+    }
+    let prompt = format!("Answer the question using only this RECENT, PROVISIONAL transcript snapshot. It may contain recognition errors, duplicate boundary words, approximate timestamps, and only You/Remote labels. Earlier discussion and the rest of the meeting are not available: never claim something was absent from the whole meeting. Cite supplied timestamps. Distinguish agreed actions from suggestions; do not invent owners or deadlines. At most 300 words.\nMeeting: {}\nQuestion: {}\nTranscript snapshot:\n{}", truncate(&clean(title), 256), clean(question), clean(transcript));
+    ollama::generate(model, &prompt, control)
+}
+
 pub struct Meeting {
     pub dir: PathBuf,
     pub title: String,
@@ -392,5 +414,25 @@ mod tests {
         assert!(Task::Question("".into()).instruction().is_err());
         assert!(Task::Question("x".repeat(1_001)).instruction().is_err());
         assert!(Task::ExpandNotes("x".repeat(4_001)).instruction().is_err());
+    }
+
+    #[test]
+    fn live_inputs_are_bounded_before_any_model_call() {
+        let control = Control::new(
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            std::time::Duration::from_secs(1),
+        );
+        for (text, question) in [
+            ("".to_owned(), "why".to_owned()),
+            ("x".repeat(8_001), "why".to_owned()),
+            ("[00:01] You: hello".to_owned(), "x".repeat(1_001)),
+        ] {
+            assert_eq!(
+                live_answer("Meeting", &text, &question, DEFAULT_MODEL, &control)
+                    .unwrap_err()
+                    .code,
+                "LIVE_INPUT"
+            );
+        }
     }
 }

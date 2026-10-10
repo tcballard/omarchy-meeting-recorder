@@ -302,6 +302,7 @@ struct Recorder {
     title_row: adw::EntryRow,
     format_row: adw::ComboRow,
     language_row: adw::ComboRow,
+    live_assistant: Rc<crate::live_panel::Panel>,
     animation: TranscribeAnimation,
     meters: [gtk::DrawingArea; 2],
     compact_meters: [gtk::DrawingArea; 2],
@@ -451,6 +452,8 @@ impl Recorder {
         group.add(&title_row);
         group.add(&format_row);
         group.add(&language_row);
+        let live_assistant = crate::live_panel::Panel::new();
+        group.add(&live_assistant.toggle);
         content.append(&group);
 
         let frozen: [Frozen; 2] = Default::default();
@@ -510,6 +513,7 @@ impl Recorder {
             .css_classes(["flat"])
             .build();
         content.append(&import_button);
+        content.append(&live_assistant.widget);
 
         // Transcribing: the animation fills the whole window.
         let animation = TranscribeAnimation::new();
@@ -741,7 +745,11 @@ impl Recorder {
             .transition_type(gtk::StackTransitionType::Crossfade)
             .transition_duration(250)
             .build();
-        layout.add_named(&content, Some("record"));
+        let record_scroll = gtk::ScrolledWindow::builder()
+            .child(&content)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .build();
+        layout.add_named(&record_scroll, Some("record"));
         layout.add_named(animation.widget(), Some("transcribing"));
         layout.add_named(&done, Some("done"));
         layout.add_named(&compact, Some("compact"));
@@ -770,6 +778,7 @@ impl Recorder {
             title_row,
             format_row,
             language_row,
+            live_assistant,
             animation,
             meters,
             compact_meters,
@@ -1393,6 +1402,9 @@ impl Recorder {
     fn render(&self) {
         let state = self.state.get();
         let recording = state == State::Recording;
+        self.live_assistant
+            .toggle
+            .set_sensitive(state == State::Idle);
         self.live.set(recording);
         self.dot.set_visible(recording);
         self.compact_button.set_visible(recording);
@@ -1564,6 +1576,7 @@ impl Recorder {
         }
         self.mic.set_paused(self.paused.get());
         self.system.set_paused(self.paused.get());
+        self.live_assistant.pause(self.paused.get());
         self.freeze_meters(self.paused.get());
         self.set_state(State::Recording);
         self.tick();
@@ -1941,12 +1954,17 @@ impl Recorder {
         self.timer.set_label("00:00");
         self.compact_timer.set_label("00:00");
         self.set_state(State::Recording);
+        if let Some(staging) = self.staging.borrow().as_ref() {
+            self.live_assistant
+                .start(staging, self.selected_language(), self.title());
+        }
     }
 
     fn stop(self: &Rc<Self>) {
         if self.state.get() != State::Recording {
             return;
         }
+        let live_session = self.live_assistant.stop();
         if self.paused.get() {
             self.paused_secs
                 .set(self.paused_secs.get() + ipc::now() - self.pause_began.get());
@@ -1973,6 +1991,9 @@ impl Recorder {
         glib::spawn_future_local(async move {
             let (audio_out, audio_staging) = (out.clone(), staging.clone());
             let saved = gio::spawn_blocking(move || {
+                if let Some(session) = live_session {
+                    session.finish();
+                }
                 let _ = std::fs::create_dir_all(&audio_out);
                 let (mic, system) = (
                     audio_staging.join("mic.raw"),

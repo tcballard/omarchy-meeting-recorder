@@ -1,5 +1,10 @@
 # Meeting Recorder
 
+**Fork development preview:** [live meeting assistant](docs/live-assistant.md)
+on `feature/local-meeting-assistant` reuses this recorder's Whisper model for
+provisional transcripts and adds native local questions and recaps. It is
+opt-in and requires target-machine testing before release.
+
 A meeting recorder for [Omarchy](https://omarchy.org). It records your microphone and the computer audio as two tracks, and when you stop you get a transcript with speakers, chapters and a player. You can also drop in a recording you already have. Everything is transcribed on your own machine.
 
 No bot joins your call, and no audio leaves your computer. It works with any meeting app, because it simply listens to what your computer plays and what you say.
